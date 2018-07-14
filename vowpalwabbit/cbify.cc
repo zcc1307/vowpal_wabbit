@@ -276,21 +276,14 @@ float compute_weight_multiplier(cbify& data, size_t i, size_t ec_type)
 	float ws_train_size = data.warm_start_train_size;
 	float intr_train_size = data.bandit_period;
 
-	if (data.validation_method != BANDIT_VALI)
+	/*if (data.validation_method != BANDIT_VALI)
 	{
 		if (ec_type == SUPERVISED && data.warm_start_iter >= ws_train_size)
 			return 0.0;
-	}
+	}*/
 
 	float total_size = ws_train_size + intr_train_size;
 	if (data.weighting_scheme == INSTANCE_WT)
-	{
-		if (ec_type == SUPERVISED)
-			weight_multiplier = (1-data.lambdas[i]) * total_size / ws_train_size;
-		else
-			weight_multiplier = data.lambdas[i] * total_size / intr_train_size;
-	}
-	else
 	{
 		float total_weight = (1-data.lambdas[i]) * ws_train_size + data.lambdas[i] * intr_train_size;
 
@@ -298,6 +291,13 @@ float compute_weight_multiplier(cbify& data, size_t i, size_t ec_type)
 			weight_multiplier = (1-data.lambdas[i]) * total_size / total_weight;
 		else
 			weight_multiplier = data.lambdas[i] * total_size / total_weight;
+	}
+	else
+	{
+		if (ec_type == SUPERVISED)
+			weight_multiplier = (1-data.lambdas[i]) * total_size / ws_train_size;
+		else
+			weight_multiplier = data.lambdas[i] * total_size / intr_train_size;
 	}
 
 	/*if (ec_type == SUPERVISED)
@@ -682,6 +682,7 @@ void predict_or_learn(cbify& data, base_learner& base, example& ec)
 
 uint32_t predict_sublearner_adf(cbify& data, base_learner& base, example& ec, uint32_t i)
 {
+	//cout<<"predict using sublearner "<< i <<endl;
 	copy_example_to_adf(data, ec);
 
 	example* ecs = data.adf_data.ecs;
@@ -834,6 +835,8 @@ void learn_cs_adf(cbify& data, size_t ec_type)
 	for (uint32_t i = 0; i < data.choices_lambda; i++)
 	{
 		float weight_multiplier = compute_weight_multiplier(data, i, ec_type);
+
+		//cout<<"weight multiplier in sup = "<<weight_multiplier<<endl;
 		for (size_t a = 0; a < data.adf_data.num_actions; ++a)
 		{
 			ecs[a].weight = data.old_weights[a] * weight_multiplier;
@@ -850,6 +853,9 @@ void learn_cs_adf(cbify& data, size_t ec_type)
 
 void predict_or_learn_cs_adf(cbify& data, base_learner& base, example& ec, bool is_update, size_t ec_type)
 {
+	if (ec_type == SUPERVISED && data.warm_start_iter >= data.warm_start_train_size)
+		is_update = false;
+
 	//Store the multiclass input label
 	MULTICLASS::label_t ld = ec.l.multi;
 
@@ -871,7 +877,7 @@ void predict_or_learn_cs_adf(cbify& data, base_learner& base, example& ec, bool 
 
 	//a hack here - allocated memories not deleted
 	//to be corrected
-	if (data.validation_method != BANDIT_VALI)
+	if (ec_type == SUPERVISED && data.validation_method != BANDIT_VALI)
 		add_to_sup_validation_adf(data, ec);
 }
 
@@ -918,6 +924,8 @@ void learn_bandit_adf(cbify& data, base_learner& base, size_t ec_type)
 	for (uint32_t i = 0; i < data.choices_lambda; i++)
 	{
 		float weight_multiplier = compute_weight_multiplier(data, i, ec_type);
+
+		//cout<<"learn in sublearner "<< i <<" with weight multiplier "<<weight_multiplier<<endl;
 		for (size_t a = 0; a < data.adf_data.num_actions; ++a)
 		{
 			ecs[a].weight = data.old_weights[a] * weight_multiplier;
@@ -932,6 +940,9 @@ void learn_bandit_adf(cbify& data, base_learner& base, size_t ec_type)
 
 void predict_or_learn_bandit_adf(cbify& data, base_learner& base, example& ec, bool is_update, size_t ec_type)
 {
+	if (ec_type == SUPERVISED && data.warm_start_iter >= data.warm_start_train_size)
+		is_update = false;
+
 	//Store the multiclass input label
 	MULTICLASS::label_t ld = ec.l.multi;
 
@@ -953,19 +964,29 @@ void predict_or_learn_bandit_adf(cbify& data, base_learner& base, example& ec, b
 	if (ec_type == BANDIT)
 	{
 		data.cb_label.costs[0] = cl;
-		accumulate_costs_ips_adf(data, ec, base);
+		//accumulate_costs_ips_adf(data, ec, base);
 	}
 	// add cb label to chosen action
 	auto& lab = data.adf_data.ecs[cl.action - 1].l.cb;
 	lab.costs.push_back(cl);
 
+	if (ec_type == BANDIT && data.validation_method == BANDIT_VALI)
+		accumulate_costs_ips_adf(data, ec, base);
+
 	if (is_update)
 		learn_bandit_adf(data, base, ec_type);
 
-	accumulate_variance_adf(data, base, ec);
+	if (ec_type == BANDIT && data.validation_method != BANDIT_VALI)
+		accumulate_costs_ips_adf(data, ec, base);
+
+	if (ec_type == BANDIT)
+		accumulate_variance_adf(data, base, ec);
 
   lab.costs.delete_v();
 	ec.pred.multiclass = cl.action;
+
+	if (ec_type == SUPERVISED && data.validation_method != BANDIT_VALI)
+		add_to_sup_validation_adf(data, ec);
 }
 
 
@@ -1119,7 +1140,7 @@ base_learner* cbify_setup(vw& all)
 	{
 		data.supervised_validation = v_init<example>();
 		//calloc_or_throw<example>(data.warm_start_period);
-		data.warm_start_train_size = data.warm_start_period / 2;
+		data.warm_start_train_size = ceil(data.warm_start_period / 2.0);
 	}
 	else
 		data.warm_start_train_size = data.warm_start_period;
