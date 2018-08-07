@@ -419,13 +419,21 @@ def update_result_dict(results_dict, new_result):
 def plot_all(mod, all_results):
 
 	#all_results = all_results[all_results['corrupt_prob_supervised']!=0.0]
-
+	'''
 	grouped_by_problem = all_results.groupby(['corrupt_type_warm_start',
 											  'corrupt_prob_warm_start',
 											  'corrupt_type_interaction',
 											  'corrupt_prob_interaction',
 											  'inter_ws_size_ratio',
 											  'epsilon'])
+	'''
+	grouped_by_problem = all_results.groupby(['corrupt_type_warm_start',
+											  'corrupt_prob_warm_start',
+											  'corrupt_type_interaction',
+											  'corrupt_prob_interaction',
+											  'inter_ws_size_ratio',
+											  'epsilon'])
+
 
 	#then group by dataset and warm_start size (corresponding to each point in cdf)
 	for name_problem, group_problem in grouped_by_problem:

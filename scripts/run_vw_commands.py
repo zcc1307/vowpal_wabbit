@@ -404,9 +404,12 @@ def params_per_task(mod):
 		[
 			[
 				#Sup-Only
+				#TODO: make sure the epsilon=0 propagates
 		 		{'warm_start_type': 1,
 				 'warm_start_update': True,
-				 'interaction_update': False},
+				 'interaction_update': False,
+				 'epsilon': 0.0
+				 },
 				#Band-Only
  		 		{'warm_start_type': 1,
  				 'warm_start_update': False,
