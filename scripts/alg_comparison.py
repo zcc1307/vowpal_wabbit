@@ -86,6 +86,7 @@ def plot_comparison(errors_1, errors_2, sizes):
 	return num_wins_1, num_wins_2
 
 def alg_info(alg_name, result_lst):
+	print alg_name
 	if (alg_name[0] == 0):
 		return result_lst[0]
 	if (alg_name[2] == True and alg_name[3] == True and alg_name[0] == 2):
@@ -216,13 +217,13 @@ def order_legends(indices):
 	ax = plt.gca()
 	handles, labels = ax.get_legend_handles_labels()
 	# sort both labels and handles by labels
-	labels, handles, indices = zip(*sorted(zip(labels, handles, indices), key=lambda t: t[2]))
+	#labels, handles, indices = zip(*sorted(zip(labels, handles, indices), key=lambda t: t[2]))
 	ax.legend(handles, labels)
 
 def save_legend(mod, indices):
 	ax = plt.gca()
 	handles, labels = ax.get_legend_handles_labels()
-	labels, handles, indices = zip(*sorted(zip(labels, handles, indices), key=lambda t: t[2]))
+	#labels, handles, indices = zip(*sorted(zip(labels, handles, indices), key=lambda t: t[2]))
 	#figlegend = pylab.figure(figsize=(26,1))
 	#figlegend.legend(handles, labels, 'center', fontsize=26, ncol=8)
 	figlegend = pylab.figure(figsize=(17,1.5))
@@ -263,9 +264,13 @@ def plot_cdf(alg_name, errs):
 	#print errs
 	#print len(errs)
 
+	'''
 	col, sty = alg_color_style(alg_name)
 
 	plt.step(np.sort(errs), np.linspace(0, 1, len(errs), endpoint=False), label=alg_str(alg_name), color=col, linestyle=sty, linewidth=2.0)
+	'''
+	#print alg_name
+	plt.step(np.sort(errs), np.linspace(0, 1, len(errs), endpoint=False), label=alg_str(alg_name[0])+'_'+str(alg_name[1]), linewidth=2.0)
 
 	#
 
@@ -280,7 +285,7 @@ def plot_all_cdfs(alg_results, mod):
 	pylab.figure(figsize=(8,6))
 
 	for alg_name, errs in alg_results.iteritems():
-		indices.append(alg_index(alg_name))
+		#indices.append(alg_index(alg_name))
 		plot_cdf(alg_name, errs)
 
 	if mod.normalize_type == 1:
@@ -291,6 +296,7 @@ def plot_all_cdfs(alg_results, mod):
 		plt.xlim(0, 1)
 
 	plt.ylim(0,1)
+	plt.savefig(mod.problemdir+'_cdf.pdf')
 	#params={'legend.fontsize':26,
 	#'axes.labelsize': 24, 'axes.titlesize':26, 'xtick.labelsize':20,
 	#'ytick.labelsize':20 }
@@ -321,7 +327,7 @@ def plot_all_lrs(lrs, mod):
 		values = [lrs_alg.count(n) for n in names]
 		plt.barh(range(len(names)),values)
 		plt.yticks(range(len(names)),names)
-		plt.savefig(mod.problemdir+alg_str_compatible(alg_names[i])+'_lr.pdf')
+		plt.savefig(mod.problemdir+alg_str_compatible(alg_names[i][0])+'_lr.pdf')
 		plt.clf()
 
 
@@ -398,11 +404,13 @@ def get_unnormalized_results(result_table):
 			new_size = row['interaction']
 
 		if row['interaction'] == new_size:
-			alg_name = (row['warm_start_type'],
+			alg_name = ((row['warm_start_type'],
 			 			row['choices_lambda'],
 			 			row['warm_start_update'],
 			 			row['interaction_update'],
-			 			row['validation_method'])
+			 			row['validation_method']),
+						row['corrupt_prob_interaction']
+						)
 			new_unnormalized_results[alg_name] = row['avg_error']
 			new_lr[alg_name] = row['learning_rate']
 		i += 1
@@ -430,7 +438,6 @@ def plot_all(mod, all_results):
 	grouped_by_problem = all_results.groupby(['corrupt_type_warm_start',
 											  'corrupt_prob_warm_start',
 											  'corrupt_type_interaction',
-											  'corrupt_prob_interaction',
 											  'inter_ws_size_ratio',
 											  'epsilon'])
 
@@ -457,7 +464,9 @@ def plot_all(mod, all_results):
 			                                              'choices_lambda',
 														  'warm_start_update',
 														  'interaction_update',
-														  'validation_method'])
+														  'validation_method',
+			 											  'corrupt_prob_interaction'
+														  ])
 
 			mod.name_dataset = name_dataset
 
@@ -479,6 +488,9 @@ def plot_all(mod, all_results):
 			#print name_dataset
 
 			for name_alg, group_alg in grouped_by_algorithm:
+				#name_alg_lst = list(name_alg)
+				#name_alg = (tuple(name_alg_lst[:5]), name_alg_lst[5])
+				#print name_alg
 				min_error = group_alg['avg_error'].min()
 				min_error_rows = group_alg[group_alg['avg_error'] == min_error]
 				num_min_error_rows = min_error_rows.shape[0]
@@ -515,11 +527,13 @@ def plot_all(mod, all_results):
 			#print result_table
 
 			new_size, new_unnormalized_result, new_lr = get_unnormalized_results(result_table)
-			if len(new_lr) != 4:
+
+			if len(new_lr) != 2:
 			 	continue
 
-			new_unnormalized_result[(0, 0, False, False, 1)] = get_maj_error(mod.maj_error_table, mod.name_dataset)
-			new_lr[(0, 0, False, False, 1)] = 0.0
+
+			#new_unnormalized_result[(0, 0, False, False, 1)] = get_maj_error(mod.maj_error_table, mod.name_dataset)
+			#new_lr[(0, 0, False, False, 1)] = 0.0
 			new_normalized_result = normalize_score(new_unnormalized_result, mod)
 
 			#first time - generate names of algorithms considered
@@ -538,8 +552,11 @@ def plot_all(mod, all_results):
 			#print len(sizes)
 			#for k, v in unnormalized_results.iteritems():
 			#	print len(v)
-
+		'''
 		mod.problemdir = mod.fulldir+problem_str(mod.name_problem)+'/'
+		'''
+		mod.problemdir = mod.fulldir+str(mod.name_problem)+'_noise_comparison/'
+
 		if not os.path.exists(mod.problemdir):
 			os.makedirs(mod.problemdir)
 
@@ -550,6 +567,7 @@ def plot_all(mod, all_results):
 		if mod.pair_comp_on is True:
 			plot_all_pair_comp(unnormalized_results, sizes, mod)
 		if mod.cdf_on is True:
+			print normalized_results
 			plot_all_cdfs(normalized_results, mod)
 
 		plot_all_lrs(lrs, mod)
@@ -675,7 +693,9 @@ if __name__ == '__main__':
 	all_results = all_results[(all_results['choices_lambda'] != 4)]
 
 
-	all_results = all_results[all_results['learning_rate'] < 1.5]
+	all_results = all_results[(all_results['corrupt_prob_interaction'] <= 0.01) | (all_results['corrupt_prob_interaction'] >= 0.49)]
+	all_results = all_results[(all_results['warm_start_update'] == False) & (all_results['interaction_update'] == True)]
+	all_results = all_results[all_results['learning_rate'] < 0.01]
 	#all_results = all_results[(all_results['corrupt_prob_interaction'] >= 0.49) & (all_results['inter_ws_size_ratio'] == 184.0) ]
 	# &	( (all_results['dataset'] == 'ds_1110_23.vw.gz') |
 	#	  (all_results['dataset'] == 'ds_1113_23.vw.gz') |
