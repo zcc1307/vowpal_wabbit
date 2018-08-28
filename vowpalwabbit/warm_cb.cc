@@ -131,10 +131,10 @@ void finish(warm_cb& data)
   CB::cb_label.delete_label(&data.cb_label);
   data.a_s.delete_v();
 
-	cout<<"average variance estimate = "<<data.cumu_var / data.inter_iter<<endl;
-	cout<<"theoretical average variance = "<<data.num_actions / data.epsilon<<endl;
-	uint32_t argmin = find_min(data.cumulative_costs);
-	cout<<"last lambda chosen = "<<data.lambdas[argmin]<<" among lambdas ranging from "<<data.lambdas[0]<<" to "<<data.lambdas[data.choices_lambda-1]<<endl;
+	//cout<<"average variance estimate = "<<data.cumu_var / data.inter_iter<<endl;
+	//cout<<"theoretical average variance = "<<data.num_actions / data.epsilon<<endl;
+	//uint32_t argmin = find_min(data.cumulative_costs);
+	//cout<<"last lambda chosen = "<<data.lambdas[argmin]<<" among lambdas ranging from "<<data.lambdas[0]<<" to "<<data.lambdas[data.choices_lambda-1]<<endl;
 
 	for (size_t a = 0; a < data.num_actions; ++a)
 	{
@@ -579,6 +579,15 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 		accumu_var_adf(data, base, ec);
 		data.a_s_adf.clear();
 		data.inter_iter++;
+
+    if (data.all->progress_add && ((float(data.inter_iter) / data.all->progress_arg) - floor(data.inter_iter / data.all->progress_arg) < 1e-4))
+    {
+      uint32_t argmin = find_min(data.cumulative_costs);
+      cout<<data.inter_iter<<" "<<data.lambdas[argmin]<<" ";
+      cout<<data.cumu_var / data.inter_iter<<" ";
+      cout<<data.num_actions / data.epsilon<<endl;
+    }
+
 	}
 	// Skipping the rest of the examples
 	else
