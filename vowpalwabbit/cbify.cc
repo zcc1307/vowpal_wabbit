@@ -34,9 +34,6 @@ struct cbify
   cbify_adf_data adf_data;
   float loss0;
   float loss1;
-  vector<example> buffer;
-  int counter;
-  int cycle;
 };
 
 float loss(cbify& data, uint32_t label, uint32_t final_prediction)
