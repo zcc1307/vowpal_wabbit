@@ -753,7 +753,8 @@ base_learner* cb_explore_adf_setup(arguments& arg)
       .keep("cb_min_cost", data->min_cb_cost, 0.f, "lower bound on cost")
       .keep("cb_max_cost", data->max_cb_cost, 1.f, "upper bound on cost")
       .keep(data->first_only, "first_only", "Only explore the first action in a tie-breaking event")
-      .keep("lambda", data->lambda, -1.0f, "parameter for softmax").missing())
+      .keep("lambda", data->lambda, -1.0f, "parameter for softmax")
+      .missing())
     return nullptr;
 
   data->all = arg.all;
