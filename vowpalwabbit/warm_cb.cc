@@ -328,8 +328,22 @@ float compute_weight_multiplier(warm_cb& data, size_t i, int ec_type)
 uint32_t predict_sublearner_adf(warm_cb& data, multi_learner& base, example& ec, uint32_t i)
 {
 	copy_example_to_adf(data, ec);
-	base.predict(data.ecs, i);
-	return data.ecs[0]->pred.a_s[0].action+1;
+
+  auto& csls = data.csls;
+  auto& cbls = data.cbls;
+  for (size_t a = 0; a < data.num_actions; ++a)
+  {
+    cbls[a] = data.ecs[a]->l.cb;
+    data.ecs[a]->l.cs = csls[a];
+  }
+  multi_learner* cs_learner = as_multiline(data.all->cost_sensitive);
+  cs_learner->predict(data.ecs, i);
+
+  for (size_t a = 0; a < data.num_actions; ++a)
+    data.ecs[a]->l.cb = cbls[a];
+
+  //base.predict(data.ecs, i);
+  return data.ecs[0]->pred.a_s[0].action+1;
 }
 
 void accumu_costs_iv_adf(warm_cb& data, multi_learner& base, example& ec)
@@ -343,9 +357,9 @@ void accumu_costs_iv_adf(warm_cb& data, multi_learner& base, example& ec)
 		if (action == cl.action)
 			data.cumulative_costs[i] += cl.cost / cl.probability;
 	}
-  cout<<"cumulative costs in warm_cb:"<<endl;
-  for (uint32_t i = 0; i < data.choices_lambda; i++)
-    cout<<data.cumulative_costs[i]<<endl;
+  //cout<<"cumulative costs in warm_cb:"<<endl;
+  //for (uint32_t i = 0; i < data.choices_lambda; i++)
+  //  cout<<data.cumulative_costs[i]<<endl;
 }
 
 template<bool use_cs>

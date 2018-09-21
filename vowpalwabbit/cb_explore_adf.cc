@@ -89,6 +89,7 @@ struct cb_explore_adf
   uint32_t total_fts;
   float pv_err;
   vector<float> pv_errs;
+  uint32_t increment;
 
 };
 
@@ -298,10 +299,8 @@ template <bool is_learn>
 void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex& examples)
 {
   data.offset = examples[0]->ft_offset;
-  uint32_t learner_idx = examples[0]->ft_offset / base.increment;
-  //cout<<"offset = "<<examples[0]->ft_offset<<endl;
-  //cout<<"base increment = "<<base.increment<<endl;
-  //Explore uniform random an epsilon fraction of the time.
+  uint32_t learner_idx = examples[0]->ft_offset / data.increment;
+
   if (is_learn && test_adf_sequence(examples) != nullptr)
     multiline_learn_or_predict<true>(base, examples, data.offset);
   else
@@ -326,18 +325,10 @@ void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex&
 
     data.pv_errs[learner_idx] += pve;
     data.counter++;
-
-    cout<<"pv_errs in cb_explore:"<<endl;
-    for (uint32_t i = 0; i < data.pv_errs.size(); i++)
-      cout<<data.pv_errs[i]<<endl;
+    //cout<<"pv_errs in cb_explore:"<<endl;
+    //for (uint32_t i = 0; i < data.pv_errs.size(); i++)
+    //  cout<<data.pv_errs[i]<<endl;
   }
-
-  //data.total_fts += examples[0]->num_features;
-  //cout<<"feature# up to example# "<<data.all->sd->example_number<<": "<<data.all->sd->total_features<<endl;
-  //cout<<"cb_explore internal counter: "<<data.counter<<": "<<data.total_fts<<endl;
-  //cout<<"cumulative costs in cb_explore:"<<endl;
-  //cout<<data.pv_err<<endl;
-
 
   float eps = 1.f;
   if (data.counter != 0)
@@ -650,6 +641,7 @@ void finish(cb_explore_adf& data)
     data.prepped_cs_labels[i].costs.delete_v();
   data.prepped_cs_labels.delete_v();
   data.gen_cs.pred_scores.costs.delete_v();
+  data.pv_errs.~vector<float>();
 }
 
 
@@ -904,12 +896,15 @@ base_learner* cb_explore_adf_setup(arguments& arg)
     if (data->explore_type == REGCB && data->gen_cs.cb_type != CB_TYPE_MTR)
       arg.trace_message << "warning: bad cb_type, RegCB only supports mtr!" << std::endl;
   }
+  data->increment = base->increment * problem_multiplier;
 
   learner<cb_explore_adf,multi_ex>& l = init_learner(data, base,
     CB_EXPLORE_ADF::do_actual_learning<true>,
     CB_EXPLORE_ADF::do_actual_learning<false>,
     problem_multiplier,
     prediction_type::action_probs);
+
+
 
   l.set_finish_example(CB_EXPLORE_ADF::finish_multiline_example);
   l.set_finish(CB_EXPLORE_ADF::finish);
