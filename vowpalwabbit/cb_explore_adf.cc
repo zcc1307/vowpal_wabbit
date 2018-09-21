@@ -324,7 +324,8 @@ void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex&
       data.pv_errs.push_back(0.f);
 
     data.pv_errs[learner_idx] += pve;
-    data.counter++;
+    if (learner_idx == 0)
+      data.counter++;
     //cout<<"pv_errs in cb_explore:"<<endl;
     //for (uint32_t i = 0; i < data.pv_errs.size(); i++)
     //  cout<<data.pv_errs[i]<<endl;
@@ -339,7 +340,10 @@ void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex&
     eps = pow( num_actions * ell_st * avg_fts / data.counter, 1.0/3 ) + \
                 pow( num_actions * avg_fts / data.counter, 1.0/2 );
     eps = min(1.f, data.eps_multip * eps);
+    //if (is_learn)
+    //  cout<<avg_fts<<" "<<ell_st<<" "<<eps<<endl;
   }
+
 
   const float prob = eps / num_actions;
   for (size_t i = 0; i < num_actions; i++)
@@ -829,7 +833,7 @@ base_learner* cb_explore_adf_setup(arguments& arg)
       .keep("cb_max_cost", data->max_cb_cost, 1.f, "upper bound on cost")
       .keep(data->first_only, "first_only", "Only explore the first action in a tie-breaking event")
       .keep("lambda", data->lambda, -1.0f, "parameter for softmax")
-      .keep("eps_t", data->eps_multip, 1.f, "multiplier for nonuniform exploration")
+      .keep("eps_t", data->eps_multip, "multiplier for nonuniform exploration")
       .missing())
     return nullptr;
 
@@ -865,6 +869,7 @@ base_learner* cb_explore_adf_setup(arguments& arg)
   {
     if (!arg.vm.count("epsilon")) data->epsilon = 0.05f;
     data->explore_type = EPS_GREEDY;
+    cout<<"epsilon = "<<data->epsilon<<endl;
   }
 
   multi_learner* base = as_multiline(setup_base(arg));

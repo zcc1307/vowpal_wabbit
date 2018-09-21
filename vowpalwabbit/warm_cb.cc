@@ -72,6 +72,7 @@ struct warm_cb
 	vector<float> lambdas;
 	action_scores a_s_adf;
 	vector<float> cumulative_costs;
+  vector<float> cumulative_vars;
 	CB::cb_class cl_adf;
 	uint32_t ws_train_size;
 	uint32_t ws_vali_size;
@@ -87,6 +88,8 @@ struct warm_cb
   float sum_fts;
   uint32_t total_iter;
 };
+
+void print_avg_costs(warm_cb& data);
 
 float loss(warm_cb& data, uint32_t label, uint32_t final_prediction)
 {
@@ -136,6 +139,7 @@ void finish(warm_cb& data)
 	//cout<<"theoretical average variance = "<<data.num_actions / data.epsilon<<endl;
 	//uint32_t argmin = find_min(data.cumulative_costs);
 	//cout<<"last lambda chosen = "<<data.lambdas[argmin]<<" among lambdas ranging from "<<data.lambdas[0]<<" to "<<data.lambdas[data.choices_lambda-1]<<endl;
+  //print_avg_costs(data);
 
 	for (size_t a = 0; a < data.num_actions; ++a)
 	{
@@ -321,7 +325,7 @@ float compute_weight_multiplier(warm_cb& data, size_t i, int ec_type)
 	return weight_multiplier;
 }
 
-//Predicting with the ith sublearner
+//Predicting with the ith sublearner (the predicted label is in {1,2,..,K})
 uint32_t predict_sublearner_adf(warm_cb& data, multi_learner& base, example& ec, uint32_t i)
 {
 	copy_example_to_adf(data, ec);
@@ -353,10 +357,16 @@ void accumu_costs_iv_adf(warm_cb& data, multi_learner& base, example& ec)
 
 		if (action == cl.action)
 			data.cumulative_costs[i] += cl.cost / cl.probability;
+
+    data.cumulative_vars[i] += 1.0 / data.a_s_adf[action-1].score;
 	}
-  //cout<<"cumulative costs in warm_cb:"<<endl;
-  //for (uint32_t i = 0; i < data.choices_lambda; i++)
-  //  cout<<data.cumulative_costs[i]<<endl;
+}
+
+void print_avg_costs(warm_cb& data)
+{
+  cout<<"pv error and its stddev in warm_cb iteration "<<data.inter_iter<<":"<<endl;
+  for (uint32_t i = 0; i < data.choices_lambda; i++)
+    cout<<data.cumulative_costs[i] / data.inter_iter<<" "<<pow(data.cumulative_vars[i], 0.5) / data.inter_iter<<endl;
 }
 
 void accumu_costs_wsv_adf(warm_cb& data, multi_learner& base)
@@ -629,7 +639,10 @@ void init_adf_data(warm_cb& data, const size_t num_actions)
 
 	setup_lambdas(data);
 	for (uint32_t i = 0; i < data.choices_lambda; i++)
+  {
 		data.cumulative_costs.push_back(0.f);
+    data.cumulative_vars.push_back(0.f);
+  }
 	data.cumu_var = 0.f;
 }
 
