@@ -680,16 +680,7 @@ base_learner* warm_cb_setup(arguments& arg)
   learner<warm_cb,example>* l;
 
   multi_learner* base = as_multiline(setup_base(arg));
-	// Note: the current version of warm start CB can only support epsilon-greedy exploration
-	// We need to wait for the epsilon value to be passed from the base
-  // cb_explore learner, if there is one
-  if (arg.vm.count("epsilon") == 0)
-  {
-    cerr<<"Warning: no epsilon (greedy parameter) specified; resetting to 0.05"<<endl;
-    data->epsilon = 0.05f;
-  }
-  else
-    data->epsilon = arg.vm["epsilon"].as<float>();
+	// Note: the current version of warm CB can only support epsilon-greedy / epsilon_t-greedy exploration
 
   l = &init_multiclass_learner(data, base, predict_or_learn_adf<true>, predict_or_learn_adf<false>, arg.all->p, data->choices_lambda);
 
