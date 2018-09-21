@@ -85,7 +85,6 @@ struct warm_cb
 	CB::label* cbls;
 	bool use_cs;
   bool nonunif_eps;
-  float eps_multip;
   float sum_fts;
   uint32_t total_iter;
 };
@@ -344,6 +343,9 @@ void accumu_costs_iv_adf(warm_cb& data, multi_learner& base, example& ec)
 		if (action == cl.action)
 			data.cumulative_costs[i] += cl.cost / cl.probability;
 	}
+  cout<<"cumulative costs in warm_cb:"<<endl;
+  for (uint32_t i = 0; i < data.choices_lambda; i++)
+    cout<<data.cumulative_costs[i]<<endl;
 }
 
 template<bool use_cs>
@@ -468,24 +470,6 @@ uint32_t predict_bandit_adf(warm_cb& data, multi_learner& base, example& ec)
 	base.predict(data.ecs, argmin);
   auto& out_ec = *data.ecs[0];
 
-  if (data.nonunif_eps)
-  {
-    float avg_fts = data.sum_fts / data.total_iter;
-    float ell_st = data.cumulative_costs[data.choices_lambda-1] / data.inter_iter;
-    float eps = pow( data.num_actions * ell_st * avg_fts / data.inter_iter, 1.0/3 ) + \
-                pow( data.num_actions * avg_fts / data.inter_iter, 1.0/2 );
-    eps = min(1.0f, data.eps_multip * eps);
-    //cout<<eps<<endl;
-
-    for (uint32_t i = 0; i < data.num_actions; i++)
-    {
-      if (i == 0)
-        out_ec.pred.a_s[i].score = 1 - eps + eps / data.num_actions;
-      else
-        out_ec.pred.a_s[i].score = eps / data.num_actions;
-    }
-  }
-
   uint32_t chosen_action;
   if (sample_after_normalizing(data.app_seed + data.example_counter++, begin_scores(out_ec.pred.a_s), end_scores(out_ec.pred.a_s), chosen_action))
     THROW("Failed to sample from pdf");
@@ -579,6 +563,7 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 	}
 
   data.sum_fts = data.sum_fts + ec.num_features;
+  //cout<<"feature# in warm_cb"<<data.sum_fts<<endl;
   data.total_iter++;
 
 	// Warm start phase
@@ -688,9 +673,7 @@ base_learner* warm_cb_setup(arguments& arg)
 			("weighting_scheme", data->wt_scheme, INSTANCE_WT, "weighting scheme (1: per instance weighting, where for every lambda, each contextual bandit example have weight lambda/(1-lambda) times that of each warm start example, 2: per dataset weighting, where for every lambda, the contextual bandit dataset has total weight lambda/(1-lambda) times that of the warm start dataset)")
 			("validation_method", data->vali_method, INTER_VALI, "lambda selection criterion (1: using contextual bandit examples with progressive validation, 2: using warm start examples, with fresh validation examples at each epoch, 3: using warm start examples, with a single validation set throughout)")
 			("overwrite_label", data->overwrite_label, 1U, "the label used by type 3 corruptions (overwriting)")
-			("warm_start_type", data->ws_type, SUPERVISED_WS, "update method of utilizing warm start examples (1: using supervised updates, 2: using contextual bandit updates)")
-      ("nonunif_eps", data->nonunif_eps, false, "nonuniform exploration")
-      ("eps_multip", data->eps_multip, 1.0f, "nonuniform exploration").missing())
+			("warm_start_type", data->ws_type, SUPERVISED_WS, "update method of utilizing warm start examples (1: using supervised updates, 2: using contextual bandit updates)").missing())
     return nullptr;
 
   data->app_seed = uniform_hash("vw", 2, 0);
@@ -712,9 +695,6 @@ base_learner* warm_cb_setup(arguments& arg)
     ss << max<float>(abs(data->loss0), abs(data->loss1)) / (data->loss1 - data->loss0);
     arg.args.push_back(ss.str());
   }
-
-  data->sum_fts = 0.f;
-  data->total_iter = 0;
 
   learner<warm_cb,example>* l;
 

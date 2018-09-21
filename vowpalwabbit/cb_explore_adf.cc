@@ -27,6 +27,8 @@ using namespace exploration;
 #define COVER 4
 //regcb
 #define REGCB 5
+//epsilon_t greedy
+#define EPS_T_GREEDY 6
 
 #define B_SEARCH_MAX_ITER 20
 
@@ -81,6 +83,13 @@ struct cb_explore_adf
   // for backing up cb example data when computing sensitivities
   std::vector<ACTION_SCORE::action_scores> ex_as;
   std::vector<v_array<CB::cb_class>> ex_costs;
+
+  // for time-varying exploration rates
+  float eps_multip;
+  uint32_t total_fts;
+  float pv_err;
+  vector<float> pv_errs;
+
 };
 
 template<class T> void swap(T& ele1, T& ele2)
@@ -274,6 +283,74 @@ void predict_or_learn_greedy(cb_explore_adf& data, multi_learner& base, multi_ex
   size_t tied_actions = fill_tied(data,preds);
 
   const float prob = data.epsilon / num_actions;
+  for (size_t i = 0; i < num_actions; i++)
+    preds[i].score = prob;
+  if (!data.first_only)
+    {
+      for (size_t i = 0; i < tied_actions; ++i)
+        preds[i].score += (1.f - data.epsilon) / tied_actions;
+    }
+  else
+    preds[0].score += 1.f - data.epsilon;
+}
+
+template <bool is_learn>
+void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex& examples)
+{
+  data.offset = examples[0]->ft_offset;
+  uint32_t learner_idx = examples[0]->ft_offset / base.increment;
+  //cout<<"offset = "<<examples[0]->ft_offset<<endl;
+  //cout<<"base increment = "<<base.increment<<endl;
+  //Explore uniform random an epsilon fraction of the time.
+  if (is_learn && test_adf_sequence(examples) != nullptr)
+    multiline_learn_or_predict<true>(base, examples, data.offset);
+  else
+    multiline_learn_or_predict<false>(base, examples, data.offset);
+
+  action_scores& preds = examples[0]->pred.a_s;
+
+  uint32_t num_actions = (uint32_t)preds.size();
+
+  size_t tied_actions = fill_tied(data,preds);
+
+  if (is_learn)
+  {
+    // update the progressive validation error array
+    float pve = 0;
+    CB::label ld = examples[preds[0].action]->l.cb;
+    if (ld.costs.size() == 1 && ld.costs[0].cost != FLT_MAX )
+      pve = ld.costs[0].cost / ld.costs[0].probability;
+
+    if (data.pv_errs.size() <= learner_idx)
+      data.pv_errs.push_back(0.f);
+
+    data.pv_errs[learner_idx] += pve;
+    data.counter++;
+
+    cout<<"pv_errs in cb_explore:"<<endl;
+    for (uint32_t i = 0; i < data.pv_errs.size(); i++)
+      cout<<data.pv_errs[i]<<endl;
+  }
+
+  //data.total_fts += examples[0]->num_features;
+  //cout<<"feature# up to example# "<<data.all->sd->example_number<<": "<<data.all->sd->total_features<<endl;
+  //cout<<"cb_explore internal counter: "<<data.counter<<": "<<data.total_fts<<endl;
+  //cout<<"cumulative costs in cb_explore:"<<endl;
+  //cout<<data.pv_err<<endl;
+
+
+  float eps = 1.f;
+  if (data.counter != 0)
+  {
+    float avg_fts = (float)data.all->sd->total_features / data.all->sd->example_number;
+    float ell_st = data.pv_errs[learner_idx] / data.counter;
+
+    eps = pow( num_actions * ell_st * avg_fts / data.counter, 1.0/3 ) + \
+                pow( num_actions * avg_fts / data.counter, 1.0/2 );
+    eps = min(1.f, data.eps_multip * eps);
+  }
+
+  const float prob = eps / num_actions;
   for (size_t i = 0; i < num_actions; i++)
     preds[i].score = prob;
   if (!data.first_only)
@@ -686,6 +763,9 @@ void do_actual_learning(cb_explore_adf& data, multi_learner& base, multi_ex& ec_
     case REGCB:
       predict_or_learn_regcb<false>(data, base, ec_seq);
       break;
+    case EPS_T_GREEDY:
+      predict_or_learn_eps_t<is_learn>(data, base, ec_seq);
+      break;
     default:
       THROW("Unknown explorer type specified for contextual bandit learning: " << data.explore_type);
     }
@@ -719,6 +799,9 @@ void do_actual_learning(cb_explore_adf& data, multi_learner& base, multi_ex& ec_
       break;
     case REGCB:
       predict_or_learn_regcb<is_learn>(data, base, ec_seq);
+      break;
+    case EPS_T_GREEDY:
+      predict_or_learn_eps_t<is_learn>(data, base, ec_seq);
       break;
     default:
       THROW("Unknown explorer type specified for contextual bandit learning: " << data.explore_type);
@@ -754,6 +837,7 @@ base_learner* cb_explore_adf_setup(arguments& arg)
       .keep("cb_max_cost", data->max_cb_cost, 1.f, "upper bound on cost")
       .keep(data->first_only, "first_only", "Only explore the first action in a tie-breaking event")
       .keep("lambda", data->lambda, -1.0f, "parameter for softmax")
+      .keep("eps_t", data->eps_multip, 1.f, "multiplier for nonuniform exploration")
       .missing())
     return nullptr;
 
@@ -783,6 +867,8 @@ base_learner* cb_explore_adf_setup(arguments& arg)
     data->explore_type = SOFTMAX;
   else if (arg.vm["regcb"].as<bool>() || arg.vm["regcbopt"].as<bool>())
     data->explore_type = REGCB;
+  else if (arg.vm.count("eps_t"))
+    data->explore_type = EPS_T_GREEDY;
   else
   {
     if (!arg.vm.count("epsilon")) data->epsilon = 0.05f;
