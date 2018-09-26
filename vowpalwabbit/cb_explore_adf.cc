@@ -329,6 +329,7 @@ void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex&
     //cout<<"pv_errs in cb_explore:"<<endl;
     //for (uint32_t i = 0; i < data.pv_errs.size(); i++)
     //  cout<<data.pv_errs[i]<<endl;
+    //cout<<data.counter<<endl;
   }
 
   float eps = 1.f;

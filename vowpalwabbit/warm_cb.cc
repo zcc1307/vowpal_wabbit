@@ -78,6 +78,7 @@ struct warm_cb
 	uint32_t ws_vali_size;
 	vector<example*> ws_vali;
 	float cumu_var;
+  float cumu_var_ideal;
 	uint32_t ws_iter;
 	uint32_t inter_iter;
 	MULTICLASS::label_t mc_label;
@@ -351,9 +352,11 @@ void accumu_costs_iv_adf(warm_cb& data, multi_learner& base, example& ec)
 {
 	CB::cb_class& cl = data.cl_adf;
 	//IPS for approximating the cumulative costs for all lambdas
+  //cout<<"accumulating costs.."<<endl;
 	for (uint32_t i = 0; i < data.choices_lambda; i++)
 	{
 		uint32_t action = predict_sublearner_adf(data, base, ec, i);
+    //cout<<data.lambdas[i]<<"\t"<<action<<endl;
 
 		if (action == cl.action)
 			data.cumulative_costs[i] += cl.cost / cl.probability;
@@ -366,7 +369,7 @@ void print_avg_costs(warm_cb& data)
 {
   cout<<"pv error and its stddev in warm_cb iteration "<<data.inter_iter<<":"<<endl;
   for (uint32_t i = 0; i < data.choices_lambda; i++)
-    cout<<data.cumulative_costs[i] / data.inter_iter<<" "<<pow(data.cumulative_vars[i], 0.5) / data.inter_iter<<endl;
+    cout<<data.lambdas[i]<<"\t"<<data.cumulative_costs[i] / data.inter_iter<<"\t"<<pow(data.cumulative_vars[i], 0.5) / data.inter_iter<<endl;
 }
 
 void accumu_costs_wsv_adf(warm_cb& data, multi_learner& base)
@@ -547,6 +550,7 @@ void accumu_var_adf(warm_cb& data, multi_learner& base, example& ec)
 			temp_var = 1.0 / data.a_s_adf[a].score;
 
 	data.cumu_var += temp_var;
+  data.cumu_var_ideal += 1.0 / data.a_s_adf[data.num_actions-1].score;
 }
 
 template <bool is_learn>
@@ -566,7 +570,6 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 	// Warm start phase
 	if (data.ws_iter < data.ws_period)
 	{
-    data.ws_iter++;
 		if (data.ws_iter < data.ws_train_size)
 		{
 			if (data.ws_type == SUPERVISED_WS)
@@ -577,11 +580,11 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 		else
 			add_to_vali(data, ec);
 		ec.weight = 0;
+    data.ws_iter++;
 	}
 	// Interaction phase
 	else if (data.inter_iter < data.inter_period)
 	{
-    data.inter_iter++;
 		predict_or_learn_bandit_adf(data, base, ec, INTERACTION);
 		accumu_var_adf(data, base, ec);
 		data.a_s_adf.clear();
@@ -591,9 +594,9 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
       uint32_t argmin = find_min(data.cumulative_costs);
       cout<<data.inter_iter<<" "<<data.lambdas[argmin]<<" ";
       cout<<data.cumu_var / data.inter_iter<<" ";
-      cout<<data.num_actions / data.epsilon<<endl;
+      cout<<data.cumu_var_ideal / data.inter_iter<<endl;
     }
-
+    data.inter_iter++;
 	}
 	// Skipping the rest of the examples
 	else
@@ -694,6 +697,13 @@ base_learner* warm_cb_setup(arguments& arg)
 
   multi_learner* base = as_multiline(setup_base(arg));
 	// Note: the current version of warm CB can only support epsilon-greedy / epsilon_t-greedy exploration
+
+  // The epsilon here is in fact inconsistent with what cb_explore's exploration parameter,
+  // if cb_explore is performing eps_t greedy
+  if (arg.vm.count("epsilon") == 0)
+    data->epsilon = 0.05f;
+  else
+    data->epsilon = arg.vm["epsilon"].as<float>();
 
   l = &init_multiclass_learner(data, base, predict_or_learn_adf<true>, predict_or_learn_adf<false>, arg.all->p, data->choices_lambda);
 
