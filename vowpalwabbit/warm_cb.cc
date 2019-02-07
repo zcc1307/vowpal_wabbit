@@ -36,6 +36,7 @@ using namespace std;
 #define ABS_CENTRAL_ZEROONE 2
 #define MINIMAX_CENTRAL 3
 #define MINIMAX_CENTRAL_ZEROONE 4
+#define OPTIONAL_CENTRAL 5
 
 
 struct warm_cb
@@ -49,6 +50,7 @@ struct warm_cb
   multi_ex ecs;
   float loss0;
   float loss1;
+  bool use_cs;
 
 	//warm start parameters
 	uint32_t ws_period;
@@ -68,7 +70,8 @@ struct warm_cb
 
 	//auxiliary variables
 	uint32_t num_actions;
-	float epsilon;
+	float e;
+  float central_lambda;
 	vector<float> lambdas;
 	action_scores a_s_adf;
 	vector<float> cumulative_costs;
@@ -163,7 +166,10 @@ void finish(warm_cb& data)
 	data.a_s_adf.delete_v();
 	for (size_t i = 0; i < data.ws_vali.size(); ++i)
 	{
-		VW::dealloc_example(MULTICLASS::mc_label.delete_label, *data.ws_vali[i]);
+		if (data.use_cs)
+			VW::dealloc_example(COST_SENSITIVE::cs_label.delete_label, *data.ws_vali[i]);
+		else
+			VW::dealloc_example(MULTICLASS::mc_label.delete_label, *data.ws_vali[i]);
 		free(data.ws_vali[i]);
 	}
 	data.ws_vali.~vector<example*>();
@@ -201,9 +207,9 @@ void copy_example_to_adf(warm_cb& data, example& ec)
   }
 }
 
-float minimax_lambda(float epsilon, size_t num_actions, size_t warm_start_period, size_t interaction_period)
+float minimax_lambda(float e, size_t num_actions, size_t warm_start_period, size_t interaction_period)
 {
-	return epsilon / (num_actions + epsilon);
+	return e / (num_actions + e);
 }
 
 void setup_lambdas(warm_cb& data)
@@ -232,9 +238,13 @@ void setup_lambdas(warm_cb& data)
 	uint32_t mid = data.choices_lambda / 2;
 
 	if (data.lambda_scheme == ABS_CENTRAL || data.lambda_scheme == ABS_CENTRAL_ZEROONE)
-		lambdas[mid] = 0.5;
-	else
-		lambdas[mid] = minimax_lambda(data.epsilon, data.num_actions, data.ws_period, data.inter_period);
+		data.central_lambda = 0.5;
+	else if (data.lambda_scheme == MINIMAX_CENTRAL || data.lambda_scheme == MINIMAX_CENTRAL_ZEROONE)
+		data.central_lambda = minimax_lambda(data.e, data.num_actions, data.ws_period, data.inter_period);
+
+  lambdas[mid] = data.central_lambda;
+
+  cout<<"central_lambda = "<<data.central_lambda<<endl;
 
 	for (uint32_t i = mid; i > 0; i--)
 		lambdas[i-1] = lambdas[i] / 2.0;
@@ -247,6 +257,9 @@ void setup_lambdas(warm_cb& data)
 		lambdas[0] = 0.0;
 		lambdas[data.choices_lambda-1] = 1.0;
 	}
+
+  //for (uint32_t i = 0; i < data.choices_lambda; i++)
+  //  cout<<lambdas[i]<<endl;
 }
 
 uint32_t generate_uar_action(warm_cb& data)
@@ -372,6 +385,7 @@ void print_avg_costs(warm_cb& data)
     cout<<data.lambdas[i]<<"\t"<<data.cumulative_costs[i] / data.inter_iter<<"\t"<<pow(data.cumulative_vars[i], 0.5) / data.inter_iter<<endl;
 }
 
+template<bool use_cs>
 void accumu_costs_wsv_adf(warm_cb& data, multi_learner& base)
 {
 	uint32_t ws_vali_size = data.ws_vali_size;
@@ -403,18 +417,24 @@ void accumu_costs_wsv_adf(warm_cb& data, multi_learner& base)
 			{
 				example* ec_vali = data.ws_vali[j];
 				uint32_t pred_label = predict_sublearner_adf(data, base, *ec_vali, i);
-				data.cumulative_costs[i] += loss(data, ec_vali->l.multi.label, pred_label);
+        if (use_cs)
+          data.cumulative_costs[i] += loss_cs(data, ec_vali->l.cs.costs, pred_label);
+        else
+          data.cumulative_costs[i] += loss(data, ec_vali->l.multi.label, pred_label);
 			}
 		}
 	}
 }
 
+template<bool use_cs>
 void add_to_vali(warm_cb& data, example& ec)
 {
 	//TODO: set the first parameter properly
 	example* ec_copy = VW::alloc_examples(sizeof(polylabel), 1);
-	VW::copy_example_data(false, ec_copy, &ec, 0, MULTICLASS::mc_label.copy_label);
-
+  if (use_cs)
+    VW::copy_example_data(false, ec_copy, &ec, 0, COST_SENSITIVE::cs_label.copy_label);
+  else
+    VW::copy_example_data(false, ec_copy, &ec, 0, MULTICLASS::mc_label.copy_label);
 	data.ws_vali.push_back(ec_copy);
 }
 
@@ -424,6 +444,7 @@ uint32_t predict_sup_adf(warm_cb& data, multi_learner& base, example& ec)
 	return predict_sublearner_adf(data, base, ec, argmin);
 }
 
+template<bool use_cs>
 void learn_sup_adf(warm_cb& data, multi_learner& base, example& ec, int ec_type)
 {
 	copy_example_to_adf(data, ec);
@@ -433,7 +454,10 @@ void learn_sup_adf(warm_cb& data, multi_learner& base, example& ec, int ec_type)
 	for (size_t a = 0; a < data.num_actions; ++a)
 	{
 		csls[a].costs[0].class_index = a+1;
-		csls[a].costs[0].x = loss(data, ec.l.multi.label, a+1);
+    if (use_cs)
+      csls[a].costs[0].x = loss_cs(data, ec.l.cs.costs, a+1);
+    else
+      csls[a].costs[0].x = loss(data, ec.l.multi.label, a+1);
 	}
 	for (size_t a = 0; a < data.num_actions; ++a)
 	{
@@ -461,12 +485,13 @@ void learn_sup_adf(warm_cb& data, multi_learner& base, example& ec, int ec_type)
 		data.ecs[a]->l.cb = cbls[a];
 }
 
+template<bool use_cs>
 void predict_or_learn_sup_adf(warm_cb& data, multi_learner& base, example& ec, int ec_type)
 {
 	uint32_t action = predict_sup_adf(data, base, ec);
 
 	if (ind_update(data, ec_type))
-		learn_sup_adf(data, base, ec, ec_type);
+		learn_sup_adf<use_cs>(data, base, ec, ec_type);
 
 	ec.pred.multiclass = action;
 }
@@ -514,6 +539,7 @@ void learn_bandit_adf(warm_cb& data, multi_learner& base, example& ec, int ec_ty
 		data.ecs[a]->weight = old_weights[a];
 }
 
+template<bool use_cs>
 void predict_or_learn_bandit_adf(warm_cb& data, multi_learner& base, example& ec, int ec_type)
 {
 	uint32_t chosen_action = predict_bandit_adf(data, base, ec);
@@ -526,7 +552,10 @@ void predict_or_learn_bandit_adf(warm_cb& data, multi_learner& base, example& ec
 	if(!cl.action)
 		THROW("No action with non-zero probability found!");
 
-	cl.cost = loss(data, ec.l.multi.label, cl.action);
+  if (use_cs)
+		cl.cost = loss_cs(data, ec.l.cs.costs, cl.action);
+	else
+		cl.cost = loss(data, ec.l.multi.label, cl.action);
 
 	if (ec_type == INTERACTION && data.vali_method == INTER_VALI)
 		accumu_costs_iv_adf(data, base, ec);
@@ -535,7 +564,7 @@ void predict_or_learn_bandit_adf(warm_cb& data, multi_learner& base, example& ec
 		learn_bandit_adf(data, base, ec, ec_type);
 
 	if (ec_type == INTERACTION && (data.vali_method == WS_VALI_SPLIT || data.vali_method == WS_VALI_NOSPLIT))
-		accumu_costs_wsv_adf(data, base);
+		accumu_costs_wsv_adf<use_cs>(data, base);
 
 	ec.pred.multiclass = cl.action;
 }
@@ -553,15 +582,20 @@ void accumu_var_adf(warm_cb& data, multi_learner& base, example& ec)
   data.cumu_var_ideal += 1.0 / data.a_s_adf[data.num_actions-1].score;
 }
 
-template <bool is_learn>
+template <bool is_learn, bool use_cs>
 void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 {
 	// Corrupt labels (only corrupting multiclass labels as of now)
-	data.mc_label = ec.l.multi;
-	if (data.ws_iter < data.ws_period)
-		ec.l.multi.label = corrupt_action(data, data.mc_label.label, WARM_START);
-	else if (data.inter_iter < data.inter_period)
-		ec.l.multi.label = corrupt_action(data, data.mc_label.label, INTERACTION);
+  if (use_cs)
+    data.cs_label = ec.l.cs;
+  else
+  {
+  	data.mc_label = ec.l.multi;
+  	if (data.ws_iter < data.ws_period)
+  		ec.l.multi.label = corrupt_action(data, data.mc_label.label, WARM_START);
+  	else if (data.inter_iter < data.inter_period)
+  		ec.l.multi.label = corrupt_action(data, data.mc_label.label, INTERACTION);
+  }
 
   data.sum_fts = data.sum_fts + ec.num_features;
   //cout<<"feature# in warm_cb"<<data.sum_fts<<endl;
@@ -573,22 +607,23 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
 		if (data.ws_iter < data.ws_train_size)
 		{
 			if (data.ws_type == SUPERVISED_WS)
-				predict_or_learn_sup_adf(data, base, ec, WARM_START);
+				predict_or_learn_sup_adf<use_cs>(data, base, ec, WARM_START);
 			else if (data.ws_type == BANDIT_WS)
-				predict_or_learn_bandit_adf(data, base, ec, WARM_START);
+				predict_or_learn_bandit_adf<use_cs>(data, base, ec, WARM_START);
 		}
 		else
-			add_to_vali(data, ec);
+			add_to_vali<use_cs>(data, ec);
 		ec.weight = 0;
     data.ws_iter++;
 	}
 	// Interaction phase
 	else if (data.inter_iter < data.inter_period)
 	{
-		predict_or_learn_bandit_adf(data, base, ec, INTERACTION);
+		predict_or_learn_bandit_adf<use_cs>(data, base, ec, INTERACTION);
 		accumu_var_adf(data, base, ec);
 		data.a_s_adf.clear();
 
+    data.inter_iter++;
     if (data.all->progress_add && ((float(data.inter_iter) / data.all->progress_arg) - floor(data.inter_iter / data.all->progress_arg) < 1e-4))
     {
       uint32_t argmin = find_min(data.cumulative_costs);
@@ -596,13 +631,16 @@ void predict_or_learn_adf(warm_cb& data, multi_learner& base, example& ec)
       cout<<data.cumu_var / data.inter_iter<<" ";
       cout<<data.cumu_var_ideal / data.inter_iter<<endl;
     }
-    data.inter_iter++;
+
 	}
 	// Skipping the rest of the examples
 	else
 		ec.weight = 0;
 
 	// Restore the original labels
+  if (use_cs)
+		ec.l.cs = data.cs_label;
+	else
 		ec.l.multi = data.mc_label;
 
 }
@@ -640,7 +678,6 @@ void init_adf_data(warm_cb& data, const size_t num_actions)
 	data.ws_iter = 0;
 	data.inter_iter = 0;
 
-	setup_lambdas(data);
 	for (uint32_t i = 0; i < data.choices_lambda; i++)
   {
 		data.cumulative_costs.push_back(0.f);
@@ -653,9 +690,11 @@ base_learner* warm_cb_setup(arguments& arg)
 {
   uint32_t num_actions=0;
   auto data = scoped_calloc_or_throw<warm_cb>();
+  bool use_cs;
 
   if (arg.new_options("Make Multiclass into Contextual Bandit")
       .critical("warm_cb", num_actions, "Convert multiclass on <k> classes into a contextual bandit problem")
+      (use_cs, "warm_cb_cs", "consume cost-sensitive classification examples instead of multiclass")
       ("loss0", data->loss0, 0.f, "loss for correct label")
       ("loss1", data->loss1, 1.f, "loss for incorrect label")
 			("warm_start", data->ws_period, 0U, "number of training examples for warm start phase")
@@ -667,7 +706,8 @@ base_learner* warm_cb_setup(arguments& arg)
 			("corrupt_type_interaction", data->cor_type_inter, UAR, "type of label corruption in the interaction phase (1: uniformly at random, 2: circular, 3: replacing with overwriting label)")
 			("corrupt_prob_interaction", data->cor_prob_inter, 0.f, "probability of label corruption in the interaction phase")
 		  ("choices_lambda", data->choices_lambda, 1U, "the number of candidate lambdas to aggregate (lambda is the importance weight parameter between the two sources) ")
-			("lambda_scheme", data->lambda_scheme, ABS_CENTRAL, "The scheme for generating candidate lambda set (1: center lambda=0.5, 2: center lambda=0.5, min lambda=0, max lambda=1, 3: center lambda=epsilon/(#actions+epsilon), 4: center lambda=epsilon/(#actions+epsilon), min lambda=0, max lambda=1); the rest of candidate lambda values are generated using a doubling scheme")
+			("lambda_scheme", data->lambda_scheme, ABS_CENTRAL, "The scheme for generating candidate lambda set (1: center lambda=0.5, 2: center lambda=0.5, min lambda=0, max lambda=1, 3: center lambda=e/(#actions+e), 4: center lambda=epsilon/(#actions+epsilon), min lambda=0, max lambda=1, (e := epsilon when eps-greedy is used and e := epsilon_0 when eps_t greedy is used) 5: user-specified value of lambda; the rest of candidate lambda values are generated using a doubling scheme")
+			("central_lambda", data->central_lambda, 0.5f, "the central value of lambda used if lambda_scheme is 5")
 			("weighting_scheme", data->wt_scheme, INSTANCE_WT, "weighting scheme (1: per instance weighting, where for every lambda, each contextual bandit example have weight lambda/(1-lambda) times that of each warm start example, 2: per dataset weighting, where for every lambda, the contextual bandit dataset has total weight lambda/(1-lambda) times that of the warm start dataset)")
 			("validation_method", data->vali_method, INTER_VALI, "lambda selection criterion (1: using contextual bandit examples with progressive validation, 2: using warm start examples, with fresh validation examples at each epoch, 3: using warm start examples, with a single validation set throughout)")
 			("overwrite_label", data->overwrite_label, 1U, "the label used by type 3 corruptions (overwriting)")
@@ -677,6 +717,7 @@ base_learner* warm_cb_setup(arguments& arg)
   data->app_seed = uniform_hash("vw", 2, 0);
   data->a_s = v_init<action_score>();
   data->all = arg.all;
+  data->use_cs = use_cs;
 
   init_adf_data(*data.get(), num_actions);
 
@@ -700,12 +741,20 @@ base_learner* warm_cb_setup(arguments& arg)
 
   // The epsilon here is in fact inconsistent with what cb_explore's exploration parameter,
   // if cb_explore is performing eps_t greedy
-  if (arg.vm.count("epsilon") == 0)
-    data->epsilon = 0.05f;
+  if (arg.vm.count("epsilon"))
+    data->e = arg.vm["epsilon"].as<float>();
+  else if (arg.vm.count("eps_t"))
+    data->e = arg.vm["eps_t"].as<float>();
   else
-    data->epsilon = arg.vm["epsilon"].as<float>();
+    data->e = 0.05f;
 
-  l = &init_multiclass_learner(data, base, predict_or_learn_adf<true>, predict_or_learn_adf<false>, arg.all->p, data->choices_lambda);
+  cout<<"e = "<<data->e<<endl;
+  setup_lambdas(*data);
+
+  if (use_cs)
+    l = &init_cost_sensitive_learner(data, base, predict_or_learn_adf<true, true>, predict_or_learn_adf<false, true>, arg.all->p, data->choices_lambda);
+  else
+    l = &init_multiclass_learner(data, base, predict_or_learn_adf<true, false>, predict_or_learn_adf<false, false>, arg.all->p, data->choices_lambda);
 
   l->set_finish(finish);
   arg.all->delete_prediction = nullptr;

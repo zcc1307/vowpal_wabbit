@@ -86,6 +86,7 @@ struct cb_explore_adf
 
   // for time-varying exploration rates
   float eps_multip;
+  float t_0;
   uint32_t total_fts;
   float pv_err;
   vector<float> pv_errs;
@@ -338,9 +339,11 @@ void predict_or_learn_eps_t(cb_explore_adf& data, multi_learner& base, multi_ex&
     float avg_fts = (float)data.all->sd->total_features / data.all->sd->example_number;
     float ell_st = data.pv_errs[learner_idx] / data.counter;
 
-    eps = pow( num_actions * ell_st * avg_fts / data.counter, 1.0/3 ) + \
-                pow( num_actions * avg_fts / data.counter, 1.0/2 );
-    eps = min(1.f, data.eps_multip * eps);
+    eps = pow( num_actions * ell_st * (avg_fts * num_actions) / (data.counter + data.t_0), 1.0/3 ) + \
+                pow( num_actions * (avg_fts * num_actions) / (data.counter + data.t_0), 1.0/2 );
+    //eps = pow( num_actions * avg_fts / (data.counter + data.t_0), 1.0/2 );
+    //eps = min(1.f, data.eps_multip * eps);
+    eps = data.eps_multip * min(1.f, eps);
     //if (is_learn)
     //  cout<<avg_fts<<" "<<ell_st<<" "<<eps<<endl;
   }
@@ -835,6 +838,7 @@ base_learner* cb_explore_adf_setup(arguments& arg)
       .keep(data->first_only, "first_only", "Only explore the first action in a tie-breaking event")
       .keep("lambda", data->lambda, -1.0f, "parameter for softmax")
       .keep("eps_t", data->eps_multip, "multiplier for nonuniform exploration")
+      .keep("t_0", data->t_0, 0.f, "additive constant for nonuniform exploration probability")
       .missing())
     return nullptr;
 
